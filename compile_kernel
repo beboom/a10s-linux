@@ -1,0 +1,113 @@
+#!/bin/bash
+
+# Este script compila o kernel para o MK802 usando os fontes da SUNXI
+# Baixe os fontes do kernel com o comando git:
+#
+# git clone https://github.com/linux-sunxi/linux-sunxi.git kernel-sunxi
+#
+# Para instalar o compilador e outros aplicativos uteis para a compilacao do
+# kernel, instale os seguintes aplicativos:
+#
+# apt-get install build-essential gcc-4.5-arm-linux-gnueabi git binfmt-support libusb-1.0-0-dev pkg-config
+#
+# Este script foi projetado para lidar com a versao 3.0 deste kernel
+
+KERVER=""
+CFGBCK=`date +"config_%Y%m%d_%H%M%S"`
+
+if [ ! -d "config_backup" ]; then
+  echo "Criando o diretorio de backup..."
+  mkdir config_backup
+fi
+
+if [ -e ".config" ]; then
+  echo "Fazendo backup da configuracao antiga em '$CFGBCK'..."
+  cp .config ./config_backup/$CFGBCK
+fi  
+
+echo "Limpar os fontes (mrproper + distclean + clean) ? (s/N): ";
+read R;
+if [ "$R" = "s" -o "$R" = "S" -o "$R" = "y" -o "$R" = "Y" ]; then
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 mrproper
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 distclean
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 clean
+fi
+
+echo "Rodar defconfig para sunxi ? (s/N): ";
+read R;
+if [ "$R" = "s" -o "$R" = "S" -o "$R" = "y" -o "$R" = "Y" ]; then
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 sun5i_defconfig
+fi
+
+echo "Rodar menuconfig ? (S/n): ";
+read R;
+if [ "$R" = "" ]; then
+  R="s"
+fi
+if [ "$R" = "s" -o "$R" = "S" -o "$R" = "y" -o "$R" = "Y" ]; then
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 menuconfig
+fi
+
+echo "Compilar o kernel ? (S/n): "
+read R
+if [ "$R" = "" ]; then
+  R="s"
+fi
+if [ "$R" = "s" -o "$R" = "S" -o "$R" = "y" -o "$R" = "Y" ]; then
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 uImage && \
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 INSTALL_MOD_PATH=output modules && \
+  make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -j16 INSTALL_MOD_PATH=output modules_install
+fi
+
+echo "Empacotar o novo kernel ? (S/n): "
+read R
+if [ "$R" = "" ]; then
+  R="s"
+fi
+if [ "$R" = "s" -o "$R" = "S" -o "$R" = "y" -o "$R" = "Y" ]; then
+  if [ -e "new_kernel.tbz2" ]; then
+    rm -f "new_kernel.tbz2";
+  fi
+
+  KERVER=`ls -1 --sort=time output/lib/modules/ | head -1`
+  echo $KERVER > kernel_version
+  tar cjvf new_kernel.tbz2 arch/arm/boot/uImage output/lib/modules/${KERVER}/ kernel_version
+fi
+
+echo "Instalar novo kernel no uSD ? (S/n): "
+read R
+if [ "$R" = "" ]; then
+  R="s"
+fi
+if [ "$R" = "s" -o "$R" = "S" -o "$R" = "y" -o "$R" = "Y" ]; then
+  KERVER=`ls -1 --sort=time output/lib/modules/ | head -1`
+ 
+  echo "Indique o path para o uSD (i.e. /dev/sdb ou /dev/sdf): "
+  read USD_PATH
+
+  umount ${USD_PATH}1
+  umount ${USD_PATH}2
+
+  mount ${USD_PATH}2 /mnt
+  mount ${USD_PATH}1 /mnt/boot
+
+  rm -rf /mnt/lib/modules/*
+  sync
+  cp -rv output/lib/modules/${KERVER} /mnt/lib/modules/
+  sync
+  
+  rm /mnt/boot/uImage
+  sync
+  cp -v arch/arm/boot/uImage /mnt/boot/uImage
+  sync
+  md5sum arch/arm/boot/uImage /mnt/boot/uImage
+
+  echo "Desmontando disco..."
+  umount ${USD_PATH}1
+  umount ${USD_PATH}2
+
+fi
+
+
+
+exit
